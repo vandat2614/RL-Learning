@@ -123,9 +123,9 @@ class BlackjackEnv:
             # Construct player cards that match the desired state
             self.player_cards = self._construct_player_cards(player_sum, usable_ace)
         
-        return (self.player_sum, self.dealer_showing, self.usable_ace)
+        return (self.player_sum, self.dealer_showing, int(self.usable_ace))
     
-    def step(self, action: int) -> Tuple[Tuple[int, int, bool], float, bool]:
+    def step(self, action: int) -> Tuple[Tuple[int, int, int], float, bool]:
         """
         Execute player action and return game response
         
@@ -145,14 +145,14 @@ class BlackjackEnv:
         if action not in [self.STICK, self.HIT]:
             raise ValueError(f"Invalid action: {action}. Must be {self.STICK} (stick) or {self.HIT} (hit)")
         
-        current_state = (self.player_sum, self.dealer_showing, self.usable_ace)
+        current_state = (self.player_sum, self.dealer_showing, int(self.usable_ace))
         
         if action == self.HIT:
             # Player takes another card
             self.player_cards.append(self._draw_card())
             self.player_sum, self.usable_ace = self._get_hand_value(self.player_cards)
             
-            new_state = (self.player_sum, self.dealer_showing, self.usable_ace)
+            new_state = (self.player_sum, self.dealer_showing, int(self.usable_ace))
             
             if self.player_sum > self.BUST_THRESHOLD:  # Player busts
                 return new_state, self.LOSE, True
@@ -287,3 +287,21 @@ class BlackjackEnv:
             return self.LOSE
         else:
             return self.DRAW
+
+
+    def get_state_ranges(self) -> dict:
+        """
+        Get value ranges for each state component
+        
+        Returns:
+            Dictionary with min/max values for each state dimension
+            
+        Note:
+            player_sum range (4-21) covers valid game states.
+            Terminal states may have player_sum > 21.
+        """
+        return {
+            'player_sum': (4, 21),
+            'dealer_showing': (1, 10), 
+            'usable_ace': (0, 1)
+        }
