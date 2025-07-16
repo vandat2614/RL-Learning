@@ -1,57 +1,73 @@
 import numpy as np
-from typing import Tuple, List, Dict, Union, Callable, Any, Optional
+from typing import Tuple, List, Dict, Union, Any, Optional
 import matplotlib.pyplot as plt
 import random
 
-def simulate_episode(env, policy: Union[Callable, Dict[Any, Any]], reset: bool = False) -> Tuple[List, List, List]:
+def simulate_episode(env, policy: np.ndarray, reset: bool = False, epsilon: float = 0.0) -> Tuple[List, List, List]:
     """
-    Simulate one episode using given policy and return complete trajectory.
-    
+    Simulate one episode using the provided policy array and return full trajectory.
+
     Args:
-        env: Environment instance with reset() and step() methods
-        policy: Policy that maps states to actions (can be array, dict, or function)
-        reset: Whether to reset the environment before simulation. If False, 
-               continues from current state in the environment.
-        
+        env: Environment instance with reset() and step() methods.
+        policy: NumPy array representing the policy. Each entry can be:
+                - An integer: deterministic action.
+                - A 1D array: stochastic distribution over actions.
+        reset: Whether to reset the environment before simulation.
+        epsilon: Probability of taking a random action instead of the greedy action
+                 (where greedy = argmax over policy probabilities or Q values).
+
     Returns:
         tuple: (states, actions, rewards) where:
-            - states: List of states for each step
-            - actions: List of actions taken at each state  
+            - states: List of states (state at each time step, including terminal state)
+            - actions: List of actions taken
             - rewards: List of rewards received after each action
-            
-    Note:
-        States array is longer by 1 element as it includes both initial and terminal states.
-        Each transition follows: states[i] -> actions[i] -> rewards[i] -> states[i+1]
+
+    Notes:
+        - Length of states = len(actions) + 1 = len(rewards) + 1
+        - Transition pattern: states[i] --actions[i]--> states[i+1] with reward[i]
     """
-    
-    # Reset environment and initialize
-    state = env.reset()
+
+    if reset:
+        state = env.reset()
+    else:
+        state = env.get_current_state()
+
     done = False
-    
-    states = [state]  # Store all states including initial state
-    actions = []      # Store actions taken
-    rewards = []      # Store rewards received
-    
+    states = [state]
+    actions = []
+    rewards = []
+
     while not done:
-        # Get action from policy
-        if callable(policy):
-            action = policy(state)
-        elif hasattr(policy, '__getitem__'):
-            action = policy[state]
+        # Select action from policy array
+        action_probs = policy[state]
+
+        if np.isscalar(action_probs) or isinstance(action_probs, (int, np.integer)):
+            # Deterministic: direct action
+            action = action_probs
         else:
-            raise ValueError("Policy must be callable or indexable")
-        
-        # Take action and get results
+            action_probs = np.asarray(action_probs)
+            num_actions = len(action_probs)
+
+            if epsilon > 0.0:
+                # Epsilon-greedy sampling
+                greedy_action = int(np.argmax(action_probs))
+                if np.random.rand() < epsilon:
+                    action = np.random.choice(num_actions)
+                else:
+                    action = greedy_action
+            else:
+                # Pure stochastic sampling
+                action = np.random.choice(num_actions, p=action_probs)
+
+        # Take action in environment
         next_state, reward, done = env.step(action)
-        
-        # Store transition components
+
         actions.append(action)
         rewards.append(reward)
         states.append(next_state)
-        
-        # Move to next state
+
         state = next_state
-    
+
     return states, actions, rewards
 
 # for example 1
@@ -352,6 +368,7 @@ def monte_carlo_es(env, init_policy: Optional[Union[np.ndarray, Dict[Any, Any]]]
 
 # For example 3
 def plot_blackjack_monte_carlo_es(policy, Q, save_path=None):
+
     """
     Plot policy and value function for Blackjack game
     
@@ -531,3 +548,136 @@ def plot_blackjack_monte_carlo_es(policy, Q, save_path=None):
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     plt.show()
+
+
+# monte carlo on policy example
+def monte_carlo_on_policy(env, epsilon: float = 0.1, init_policy: Optional[np.ndarray] = None, max_episodes: int = 100000, verbose: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Find optimal policy using Monte Carlo On-Policy First-Visit algorithm with ε-soft policies.
+
+    This function implements the On-Policy First-Visit Monte Carlo algorithm to find the optimal 
+    policy and action-value function for a given environment. The algorithm uses ε-soft policies 
+    to maintain exploration while following the current policy, ensuring all state-action pairs 
+    have a non-zero probability of being visited.
+
+    Args:
+        env: Environment instance that provides state space, action space, and transition 
+            dynamics. Must implement get_all_states(), get_actions(state), reset(state), 
+            get_action_space(), get_state_space(), and step(action) methods.
+        epsilon: Exploration parameter for ε-soft policy. Determines the probability of 
+                selecting a random action (default: 0.1).
+        init_policy: Initial ε-soft policy representing the starting strategy to be improved. 
+                    Must be a numpy array where init_policy[state][action] gives the action 
+                    probabilities for that state. If None, a uniform ε-soft policy is 
+                    initialized for all states. If provided, must already be ε-soft 
+                    (default: None).
+        max_episodes: Maximum number of episodes to run before terminating the algorithm. 
+                    This prevents infinite loops in cases where convergence is not achieved 
+                    within a reasonable time or when the environment has challenging 
+                    exploration requirements (default: 100000).
+        verbose: If True, print progress every 10% of episodes completed (default: False).
+
+    
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: A tuple containing:
+            - policy: NumPy array of shape (22, 11, 2, 2) representing the action probabilities 
+                for each state under the ε-soft policy
+            - Q: NumPy array of shape (22, 11, 2, 2) representing the action-value function Q(s,a), 
+                where Q[state][action] gives the expected return for taking action 
+                in state and following the current ε-soft policy thereafter
+    
+    Algorithm:
+        1. Initialize, for all s ∈ S, a ∈ A(s):
+            - Q(s,a) ← arbitrary
+            - Returns(s,a) ← empty list
+            - π(a|s) ← an arbitrary ε-soft policy
+        2. Repeat forever:
+            - Generate an episode using π
+            - For each pair s,a appearing in the episode:
+            * G ← the return that follows the first occurrence of s,a
+            * Append G to Returns(s,a)
+            * Q(s,a) ← average(Returns(s,a))
+            - For each s in the episode:
+            * A* ← argmax_a Q(s,a) (with ties broken arbitrarily)
+            * For all a ∈ A(s):
+                * π(a|s) ← { 1 - ε + ε/|A(s)| if a = A*
+                            { ε/|A(s)|           if a ≠ A*
+    """
+    
+    # Cache all states 
+    all_states = env.get_all_states()
+    
+    # Initialize Q(state,action) ← arbitrary for all state ∈ S, action ∈ A(state)
+    state_space = env.get_state_space()
+    state_shape = tuple(max_val + 1 for (min_val, max_val) in state_space.values())
+    
+    all_actions = env.get_action_space()
+    num_actions = len(all_actions)
+
+    Q = np.zeros(shape=(state_shape + (num_actions,)), dtype=float)
+    C = np.zeros_like(Q, dtype=int)  # Counter for incremental average updates
+
+    # Initialize π(a|s) ← an arbitrary ε-soft policy for all state ∈ S
+    if init_policy is None:
+        # Initialize uniform ε-soft policy (all non-terminal states have num_actions valid actions)
+        policy = np.ones_like(Q, dtype=float) / num_actions
+    else:
+        # Assume provided policy is already ε-soft
+        policy = init_policy.copy()
+    
+    # Calculate progress milestones for verbose output
+    progress_milestones = []
+    if verbose:
+        for i in range(1, 11):  # 10%, 20%, ..., 100%
+            milestone = int(max_episodes * i / 10)
+            progress_milestones.append(milestone)
+    
+    for episode in range(max_episodes):
+        
+        # Generate an episode using π
+        states, actions, rewards = simulate_episode(env, policy, reset=True)
+        
+        G = 0
+
+        # For each pair s,a appearing in the episode (going backwards):
+        for t in range(len(states) - 1, -1, -1):
+            state = states[t]
+            
+            # Add reward if not terminal state
+            if t >= len(rewards):
+                continue
+            G += rewards[t]
+            action = actions[t]
+            
+            # First-visit Monte Carlo: check if this is first occurrence of state-action pair
+            state_action_pairs = [(states[i], actions[i]) for i in range(t)]
+            if (state, action) not in state_action_pairs:
+                # Incremental update: Q(s,a) ← Q(s,a) + 1/n * (G - Q(s,a))
+                C[state][action] += 1
+                Q[state][action] += (1.0 / C[state][action]) * (G - Q[state][action])
+
+        # For each s in the episode:
+        for state in states[:-1]:  # Exclude terminal state
+            valid_actions = env.get_actions(state)
+            num_valid_actions = len(valid_actions)
+            
+            # A* ← argmax_a Q(s,a) (with ties broken arbitrarily)
+            q_values = [Q[state][a] for a in valid_actions]
+            best_action_idx = np.argmax(q_values)
+            best_action = valid_actions[best_action_idx]
+            
+            # For all a ∈ A(s): Update π(a|s) to be ε-soft
+            for action in valid_actions:
+                if action == best_action:
+                    # π(a|s) ← 1 - ε + ε/|A(s)| if a = A*
+                    policy[state][action] = 1 - epsilon + epsilon / num_valid_actions
+                else:
+                    # π(a|s) ← ε/|A(s)| if a ≠ A*
+                    policy[state][action] = epsilon / num_valid_actions
+
+        # Print progress if verbose and at milestone
+        if verbose and (episode + 1) in progress_milestones:
+            progress_percent = int(((episode + 1) / max_episodes) * 100)
+            print(f"Completed {episode + 1} episodes ({progress_percent}%)")
+    
+    return policy, Q
