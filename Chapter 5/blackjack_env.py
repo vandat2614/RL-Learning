@@ -1,6 +1,5 @@
 import random
-from typing import Tuple, Optional
-
+from typing import Tuple, Optional, List
 class BlackjackEnv:
     """
     Blackjack game environment implementing standard casino rules.
@@ -51,6 +50,9 @@ class BlackjackEnv:
     
     def __init__(self):
         self.reset()
+        self.actions = [self.HIT, self.STICK]
+
+
     
     def _validate_state(self, state: Tuple[int, int, bool]) -> None:
         """
@@ -289,7 +291,7 @@ class BlackjackEnv:
             return self.DRAW
 
 
-    def get_state_ranges(self) -> dict:
+    def get_state_space(self) -> dict:
         """
         Get value ranges for each state component
         
@@ -305,3 +307,67 @@ class BlackjackEnv:
             'dealer_showing': (1, 10), 
             'usable_ace': (0, 1)
         }
+
+    def get_all_states(self) -> List[Tuple[int, int, int]]:
+        """
+        Get all possible non-terminal states in the Blackjack game
+        
+        Returns:
+            List of all valid state tuples (player_sum, dealer_showing, usable_ace)
+            Only includes states where player can still take actions (non-terminal)
+        """
+        all_states = []
+        
+        # Dealer showing card can be 1-10
+        for dealer_showing in range(1, 11):
+            # States without usable ace: player_sum 4-20
+            for player_sum in range(4, 21):  # 4 to 20 inclusive
+                all_states.append((player_sum, dealer_showing, 0))
+            
+            # States with usable ace: player_sum 13-21
+            for player_sum in range(13, 22):  # 13 to 21 inclusive
+                all_states.append((player_sum, dealer_showing, 1))
+        
+        return all_states
+    
+    def get_actions(self, state: Tuple[int, int, int]) -> List[int]:
+        """
+        Get valid actions for a given state
+        
+        Args:
+            state: Game state tuple (player_sum, dealer_showing, usable_ace)
+            
+        Returns:
+            List of valid actions [STICK, HIT] for non-terminal states
+            Empty list for terminal states
+        """
+        player_sum, dealer_showing, usable_ace = state
+        
+        # Terminal states (player busted) have no valid actions
+        if player_sum > self.BUST_THRESHOLD:
+            return []
+        
+        # All non-terminal states allow both STICK and HIT
+        return [self.STICK, self.HIT]
+    
+    def is_terminal(self, state: Tuple[int, int, int]) -> bool:
+        """
+        Check if a state is terminal (game over)
+        
+        Args:
+            state: Game state tuple (player_sum, dealer_showing, usable_ace)
+            
+        Returns:
+            True if state is terminal (player busted), False otherwise
+        """
+        player_sum, dealer_showing, usable_ace = state
+        return player_sum > self.BUST_THRESHOLD
+    
+    def get_action_space(self):
+        """
+        Return the list of available actions in this environment.
+
+        Returns:
+            list: A list of valid discrete actions (e.g., [0, 1]).
+        """
+        return self.actions
